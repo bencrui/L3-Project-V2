@@ -26,10 +26,11 @@ public class Player : MonoBehaviour
     bool Jumping = false;
     bool Falling = false;
     bool Drawing = false;
-    bool Stabbing = false;
     bool damaged = false;
     public bool pogoFalling = false;
     bool pogoStabbing = false;
+
+    public float attackLength;
 
     public float horizontal;
     public PlayerState State = PlayerState.Movement;
@@ -60,55 +61,26 @@ public class Player : MonoBehaviour
     private float lockedTill = 0;
     private int currentState;
 
+    public void OnAttack(InputValue value)
+    {
+        StartCoroutine(EnterAttackState());
+    }
+
+    public void OnMove(InputValue value)
+    {
+        horizontal = value.Get<Vector2>().x;
+    }
+
+    public void OnJump(InputValue value)
+    {
+        wantsToJump = true;
+    }
+
     void Update()
     {
-        horizontal = Input.GetAxisRaw("Horizontal");
 
         //Current abilities.
         // walk, dash, jump, shoot
-
-        //jump
-        if (IsGrounded())
-        {
-            if (Input.GetKeyDown(KeyCode.Z)) // if on ground, then jump
-                StartCoroutine("ToJump");
-            if (Falling)
-            { // if on ground and finished jumping
-                Falling = false;
-                canDash = true;
-                if (pogoFalling)
-                    StartCoroutine(ToPogoStab(0));
-            }
-
-            //knife
-            if (Input.GetKeyDown(KeyCode.X))
-            {
-                if (!Stabbing)
-                    StartCoroutine(ToStab());
-            }
-
-            if (Input.GetKeyDown(KeyCode.C))
-            { // arrow business
-                lockedTill = Time.time + 0.5f;
-                Drawing = true;
-            }
-        }
-        else // if not on ground
-        {
-            if (rb.velocity.y <= 0) // tip point
-            {
-                Falling = true;
-                Jumping = false;
-            }
-            if (Input.GetKeyDown(KeyCode.X))
-            {
-                pogoFalling = true;
-            }
-        }
-        if (Input.GetKeyUp(KeyCode.Z) && rb.velocity.y > 0) // the longer they wait, the higher they go
-            rb.velocity = new Vector2(rb.velocity.x, rb.velocity.y * 0.5f);
-
-        
 
         if (Stabbing || pogoFalling)
         {
@@ -166,19 +138,28 @@ public class Player : MonoBehaviour
 
         if (!Stabbing && !Drawing)
             Flip();
-
-        //animation
-        var state = GetState();
-
-        if (state == currentState) return;
-        anim.CrossFade(state, 0, 0);
-        currentState = state;
     }
 
     private void FixedUpdate()
     {
+        switch (State)
+        {
+            case PlayerState.Movement:
+                UpdateMovementState();
+                break;
+            case PlayerState.Dash:
+                UpdateDashState();
+                break;
+            case PlayerState.Hit:
+                UpdateHitState();
+                break;
+            case PlayerState.Movement():
+                UpdateMovementState();
+                break;
+        }
+
         //walk
-        if (Drawing || Stabbing || pogoFalling)
+        if (Drawing || pogoFalling)
             horizontal = 0;
         if (!(isDashing || damaged))
             rb.velocity = new Vector2(horizontal * speed, rb.velocity.y);
@@ -198,14 +179,11 @@ public class Player : MonoBehaviour
             return pogoFall;
         if (pogoStabbing)
             return pogoStab;
-        if (Stabbing)
-            return Stab;
         if (Drawing)
-        {
             return Draw;
-        }
-            //if (crouching) return Crouch;
-            if (Jumping) return Jump;
+
+        //if (crouching) return Crouch;
+        if (Jumping) return Jump;
         if (Falling) return Fall;
 
         if (IsGrounded())
@@ -216,12 +194,6 @@ public class Player : MonoBehaviour
         }
 
         return rb.velocity.y > 0 ? Jump : Fall;
-
-        //int LockState(int s, float t)
-        //{
-            //lockedTill = Time.time + t;
-            //return s;
-        //}
     }
 
     private IEnumerator ToJump()
@@ -231,13 +203,30 @@ public class Player : MonoBehaviour
         rb.velocity = new Vector2(rb.velocity.x, jumpingPower);
     }
 
-    private IEnumerator ToStab()
+    private void EnterAttackState()
     {
-        Stabbing = true;
-        if (facingRight)
-            rb.velocity = new Vector2(-3, rb.velocity.y);
-        yield return new WaitForSeconds(0.3f);
-        Stabbing = false;
+        if (State != Dash || !canAttack || Stabbing || Time.time < attackLength)
+            return;
+        State = State.Attack();
+        attackLength = Time.time + 0.3f;
+    }
+
+    private void EnterDashState()
+    {
+        State = PlayerState.Dash;
+
+        canDash = false;
+        isDashing = true;
+        rb.gravityScale = 0;
+        gameObject.GetComponent<BoxCollider2D>().enabled = false;
+        groundCheck.gameObject.GetComponent<BoxCollider2D>().enabled = true;
+        rb.velocity = new Vector2(transform.localScale.x * dashingPower, 0);
+        tr.emitting = true;
+    }
+
+    private void EnterMovementState()
+    {
+        State = PlayerState.Movement;
     }
 
     private IEnumerator ToPogoStab(int enemyStab)
@@ -249,26 +238,63 @@ public class Player : MonoBehaviour
         pogoStabbing = false;
     }
 
-    private IEnumerator Dash()
+    private void UpdateAttackState()
     {
-        canDash = false;
-        isDashing = true;
-        float originalGravity = rb.gravityScale;
-        rb.gravityScale = 0;
-        gameObject.GetComponent<BoxCollider2D>().enabled = false;
-        groundCheck.gameObject.GetComponent<BoxCollider2D>().enabled = true;
-        rb.velocity = new Vector2(transform.localScale.x * dashingPower, 0);
-        tr.emitting = true;
+        if (Time.time > attackLength)
+            EnterMovementState();
+    }
 
-        yield return new WaitForSeconds(dashingTime);
+    private void UpdateMovementState()
+    {
+        if (wantsToJump)
+        {
+
+        }
+        if (IsGrounded() && !Jumping)
+        {
+            if (Input.GetKeyDown(KeyCode.Z)) // if on ground, then jump
+                StartCoroutine("ToJump");
+            if (Falling)
+            { // if on ground and finished jumping
+                Falling = false;
+                canDash = true;
+                if (pogoFalling)
+                    StartCoroutine(ToPogoStab(0));
+            }
+
+            if (Input.GetKeyDown(KeyCode.C))
+            { // arrow business
+                lockedTill = Time.time + 0.5f;
+                Drawing = true;
+            }
+        }
+        else // if not on ground
+        {
+            if (rb.velocity.y <= 0) // tip point
+            {
+                Falling = true;
+                Jumping = false;
+            }
+            if (Input.GetKeyDown(KeyCode.X))
+            {
+                pogoFalling = true;
+            }
+        }
+        if (Input.GetKeyUp(KeyCode.Z) && rb.velocity.y > 0) // the longer they wait, the higher they go
+            rb.velocity = new Vector2(rb.velocity.x, rb.velocity.y * 0.5f);
+    }
+
+    private void UpdateDashState()
+    {
+        if (Time.time < dashingTime)
+            return;
 
         tr.emitting = false;
         rb.gravityScale = originalGravity;
         gameObject.GetComponent<BoxCollider2D>().enabled = true;
         groundCheck.gameObject.GetComponent<BoxCollider2D>().enabled = false;
-        isDashing = false;
 
-        yield return new WaitForSeconds(dashingCooldown);
+        dashingCooldown = Time.time + 0.5f;
 
         if (!Jumping && !Falling)
             canDash = true;
